@@ -75,6 +75,8 @@ function maybe_evaluate_builtin(frame, call_expr, expand::Bool)
             push!(new_expr.args, (isa(x, Symbol) || isa(x, Expr) || isa(x, QuoteNode)) ? QuoteNode(x) : x)
         end
         return new_expr
+    elseif f === Core._apply_iterate
+        return Some{Any}(Core._apply_iterate("foo"))
     elseif f === Core._apply_pure
         return Some{Any}(Core._apply_pure(getargs(args, frame)...))
     elseif f === Core._expr

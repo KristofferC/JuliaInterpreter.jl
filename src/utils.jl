@@ -589,6 +589,15 @@ respectively) can be evaluated using the syntax `var"%3"` and `var"@_4"` respect
 """
 function eval_code end
 
+function extract_usage!(s::Set{Symbol}, expr::Expr)
+    for arg in expr.args
+        extract_usage!(s, arg)
+    end
+    nothing
+end
+extract_usage!(s::Set{Symbol}, sym::Symbol) = push!(s, sym)
+extract_usage!(s::Set{Symbol}, ::Any) = nothing
+
 eval_code(frame::Frame, command::AbstractString) = eval_code(frame, Base.parse_input_line(command))
 function eval_code(frame::Frame, expr)
     code = frame.framecode
@@ -598,19 +607,24 @@ function eval_code(frame::Frame, expr)
     if isexpr(expr, :toplevel)
       expr = Expr(:block, expr.args...)
     end
+
+    used_symbols = Set{Symbol}()
+    extract_usage!(used_symbols, expr)
     # see https://github.com/JuliaLang/julia/issues/31255 for the Symbol("") check
-    vars = filter(v -> v.name != Symbol(""), locals(frame))
-    defined_ssa = findall(x -> x!=0, [isassigned(data.ssavalues, i) for i in 1:length(data.ssavalues)])
-    defined_locals = findall(x -> x isa Some, data.locals)
+    vars = filter(v -> v.name != Symbol("") && v.name in used_symbols, locals(frame))
+    # defined_ssa = findall(x -> x!=0, [isassigned(data.ssavalues, i) for i in 1:length(data.ssavalues)])
+    # defined_locals = findall(x -> x isa Some, data.locals)
     res = gensym()
     eval_expr = Expr(:let,
                      Expr(:block, map(x->Expr(:(=), x...), [(v.name, QuoteNode(v.value isa Core.Box ? v.value.contents : v.value)) for v in vars])...,
-                     map(x->Expr(:(=), x...), [(Symbol("%$i"), QuoteNode(data.ssavalues[i])) for i in defined_ssa])...,
-                     map(x->Expr(:(=), x...), [(Symbol("@_$i"), QuoteNode(data.locals[i].value)) for i in defined_locals])...),
+                     # map(x->Expr(:(=), x...), [(Symbol("%$i"), QuoteNode(data.ssavalues[i])) for i in defined_ssa])...,
+                     # map(x->Expr(:(=), x...), [(Symbol("@_$i"), QuoteNode(data.locals[i].value)) for i in defined_locals])...,
+                     ),
         Expr(:block,
             Expr(:(=), res, expr),
             Expr(:tuple, res, Expr(:tuple, [v.name for v in vars]...))
         ))
+
     eval_res, res = Core.eval(moduleof(frame), eval_expr)
     j = 1
     for (i, v) in enumerate(vars)
